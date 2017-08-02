@@ -28,14 +28,19 @@ struct macAddr{
     uint8_t addr[6];
 };
 
-struct threadArgs{
+struct spoofArgs{
 	pcap_t *handle;
 	struct in_addr senderIP;
 	struct in_addr targetIP;
+	struct in_addr myIP;
+	struct macAddr senderMAC;
+	struct macAddr targetMAC;
+	struct macAddr myMAC;
+	struct spoofArgs *next;
 };
 
 void usage( char *progName );
-struct macAddr *resolveSenderMAC( struct macAddr *senderMAC, struct macAddr *myMAC, struct in_addr *senderIP, struct in_addr *myIP, pcap_t *handle );
+struct macAddr *resolveMAC( struct macAddr *senderMAC, struct macAddr *myMAC, struct in_addr *senderIP, struct in_addr *myIP, pcap_t *handle );
 struct macAddr *resolveMyMAC( struct macAddr *myMAC, char *interface );
 struct in_addr *resolveMyIP( struct in_addr *myIP, char *interface );
 int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAddr *myMAC, struct in_addr *targetIP, pcap_t *handle );

