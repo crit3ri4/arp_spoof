@@ -17,6 +17,7 @@
 #include <string.h>
 #include <netdb.h>
 #include <ifaddrs.h>
+#include <pthread.h>
 
 #ifdef MACOSX
 #include <net/if_dl.h>
@@ -45,4 +46,4 @@ struct macAddr *resolveMyMAC( struct macAddr *myMAC, char *interface );
 struct in_addr *resolveMyIP( struct in_addr *myIP, char *interface );
 int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAddr *myMAC, struct in_addr *targetIP, pcap_t *handle );
 char *macToStr( struct macAddr *MAC, char *dest );
-void arp_spoof(void *args);
+void *intervalInfect(void *args);

