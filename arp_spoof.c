@@ -26,7 +26,7 @@ int main(int argc, char *argv[]){
 
 
 	interface = argv[1];
-	handle = pcap_open_live( interface, BUFSIZ, 1, 1000, errbuf );
+	handle = pcap_open_live( interface, BUFSIZ, 1, 1, errbuf );
 	if( handle == NULL ){
 		fprintf( stderr, "Couldn't open device %s: %s\n", interface, errbuf );
 		return -1;
