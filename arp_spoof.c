@@ -86,7 +86,10 @@ int main(int argc, char *argv[]){
 
 			tmpArg = head;
 			while(tmpArg){
-				if(!memcmp(&etherHDR->ether_shost, &tmpArg->senderMAC, sizeof(struct macAddr)) && !memcmp(&etherHDR->ether_dhost, &tmpArg->myMAC, sizeof(struct macAddr))){
+				if(!memcmp(&etherHDR->ether_shost, &tmpArg->senderMAC, sizeof(struct macAddr)) &&
+					   	!memcmp(&etherHDR->ether_dhost, &tmpArg->myMAC, sizeof(struct macAddr)) &&
+						(ipHDR->saddr == tmpArg->senderIP.s_addr) &&
+						(ipHDR->daddr == tmpArg->targetIP.s_addr)){
 					memcpy(&etherHDR->ether_shost, &tmpArg->myMAC, sizeof(struct macAddr));
 					memcpy(&etherHDR->ether_dhost, &tmpArg->targetMAC, sizeof(struct macAddr));
 

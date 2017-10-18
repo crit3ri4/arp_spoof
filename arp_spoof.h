@@ -40,6 +40,21 @@ struct spoofArgs{
 	struct spoofArgs *next;
 };
 
+struct iphdr {
+	uint8_t	ihl:4,
+		version:4;
+	uint8_t	tos;
+	uint16_t	tot_len;
+	uint16_t	id;
+	uint16_t	frag_off;
+	uint8_t	ttl;
+	uint8_t	protocol;
+	uint16_t	check;
+	uint32_t	saddr;
+	uint32_t	daddr;
+	/*The options start here. */
+};
+
 void usage( char *progName );
 struct macAddr *resolveMAC( struct macAddr *senderMAC, struct macAddr *myMAC, struct in_addr *senderIP, struct in_addr *myIP, pcap_t *handle );
 struct macAddr *resolveMyMAC( struct macAddr *myMAC, char *interface );
