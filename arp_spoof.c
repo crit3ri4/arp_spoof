@@ -100,6 +100,7 @@ int main(int argc, char *argv[]){
 				}
 				tmpArg = tmpArg->next;
 			}
+			free(tPacket);
 		}
 		else if( etherHDR->ether_type == htons(ETHERTYPE_ARP) ){
 			/// CHECK IF ARP WILL RECOVER AND INFECT AGAIN
@@ -184,6 +185,8 @@ int infectARP( struct macAddr *senderMAC, struct in_addr *senderIP, struct macAd
 	if( pcap_sendpacket( handle, packet, packetSize ) ){
 		exit(1);
 	}
+
+	free(packet);
 
 	return 0;
 }
@@ -363,6 +366,8 @@ struct macAddr *resolveMAC( struct macAddr *senderMAC, struct macAddr *myMAC, st
 		memcpy( senderMAC, rsenderMAC, sizeof(struct macAddr) );
 		break;
 	}
+
+	free(packet);
 
 	return senderMAC;
 }
